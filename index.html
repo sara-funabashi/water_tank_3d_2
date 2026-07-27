@@ -348,7 +348,7 @@ function createSimpleTextSprite(text, options = {}) {
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: true, transparent: true });
   const sprite = new THREE.Sprite(mat);
   const scale = options.scale || 1.0;
   const aspect = canvas.width / canvas.height;
@@ -648,7 +648,7 @@ let pumpCube; // ラベル表示のため外部スコープに保持
 
   // 「加圧ポンパー」ラベル
   const pumpLabel = createSimpleTextSprite('加圧ポンパー', { fontSize: 130, scale: 0.45 });
-  pumpLabel.position.set(cube.position.x, cube.position.y + 0.1, cube.position.z); // 立方体中央付近
+  pumpLabel.position.set(cube.position.x, cube.position.y + 0.1, cube.position.z - 1.0); // 手前(Z軸)に配置
   tank.add(pumpLabel);
 }
 
@@ -889,7 +889,7 @@ function animate() {
   // 「取説」リンクの位置をpumpLabelの下に追従させる
   if (pumpCube) {
     const manualLink = document.getElementById('manualLink');
-    const worldPos = new THREE.Vector3(pumpCube.position.x, pumpCube.position.y - 0.15, pumpCube.position.z);
+    const worldPos = new THREE.Vector3(pumpCube.position.x, pumpCube.position.y - 0.1, pumpCube.position.z + 0.45);
     tank.localToWorld(worldPos);
     const projected = worldPos.clone().project(camera);
 
