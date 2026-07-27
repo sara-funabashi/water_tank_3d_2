@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>受水槽 3Dテンプレート v2</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #eef0f2;
+    overflow: hidden;
+    font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  }
+  #info {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    color: #445;
+    font-size: 14px;
+    background: rgba(255,255,255,0.75);
+    padding: 8px 14px;
+    border-radius: 8px;
+    pointer-events: none;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  canvas { display: block; touch-action: none; }
+</style>
+</head>
+<body>
+<div id="info">マウスドラッグで回転 / ホイールでズーム</div>
+<a id="manualLink" href="https://www.kawamoto.co.jp/manual/87233012.pdf" target="_blank" rel="noopener noreferrer"
+   style="position:absolute; display:none; color:#1a56db; font-weight:bold; font-size:15px; text-decoration:underline; background:rgba(255,255,255,0.85); padding:2px 8px; border-radius:6px; pointer-events:auto; transform:translate(-50%,-50%); z-index:10; white-space:nowrap;">取説</a>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ================= シーン基本セットアップ =================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xeef0f2);
+
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 200);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+scene.add(ambient);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.95);
+dirLight.position.set(8, 14, 10);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.left = -10;
+dirLight.shadow.camera.right = 10;
+dirLight.shadow.camera.top = 10;
+dirLight.shadow.camera.bottom = -10;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+fillLight.position.set(-8, 5, -8);
+scene.add(fillLight);
+
+// 床
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(60, 60),
+  new THREE.MeshStandardMaterial({ color: 0xd7dce0, roughness: 1 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -2.6;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ================= タンク寸法 =================
+// 実写真を参考に横長の直方体(複数パネル連結)に変更
+const W = 7.2;   // 長辺方向 (x) - パネル連結の長さ
+const D = 2.0;   // 奥行き (z)
+const H = 2.2;   // 高さ (y)
+const LONG_PANELS = 4;   // 長辺面のパネル分割数
+const END_PANELS  = 1;   // 短辺面のパネル分割数
+
+const tank = new THREE.Group();
+scene.add(tank);
+tank.position.y = 0.55; // 脚の分だけ持ち上げ
+
+// ================= パネルテクスチャ生成(FRPパネルの継ぎ目・アーチ補強・ボルト) =================
+function createPanelTexture(panelCols, faceWidthRatio) {
+  const cw = 1024;
+  const ch = Math.round(cw * (H / (W * faceWidthRatio)));
+  const canvas = document.createElement('canvas');
+  canvas.width = cw;
+  canvas.height = Math.max(ch, 300);
+  const ctx = canvas.getContext('2d');
+
+  // ベースのクリーム色(汚れ感を少し出す)
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#d9cd94');
+  grad.addColorStop(1, '#c9bb80');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // ノイズ(汚れ)
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(90,80,50,${Math.random() * 0.05})`;
+    const rx = Math.random() * canvas.width;
+    const ry = Math.random() * canvas.height;
+    ctx.fillRect(rx, ry, Math.random() * 40 + 5, Math.random() * 3 + 1);
+  }
+
+  const panelW = canvas.width / panelCols;
+
+  // パネルごとのアーチ状補強リブ(半円の凹み模様)
+  for (let p = 0; p < panelCols; p++) {
+    const cx = panelW * p + panelW / 2;
+    const archW = panelW * 0.42;
+    const archH = canvas.height * 0.30;
+    const baseY = canvas.height * 0.86;
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx, baseY, archW, archH, 0, Math.PI, 0, false);
+    ctx.closePath();
+    const archGrad = ctx.createLinearGradient(cx, baseY - archH, cx, baseY);
+    archGrad.addColorStop(0, 'rgba(255,255,255,0.18)');
+    archGrad.addColorStop(0.5, 'rgba(90,75,40,0.12)');
+    archGrad.addColorStop(1, 'rgba(90,75,40,0.22)');
+    ctx.fillStyle = archGrad;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(70,60,30,0.25)';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // パネル境界のフレーム線 + ボルト
+  ctx.fillStyle = '#8b8f92';
+  for (let p = 1; p < panelCols; p++) {
+    const x = panelW * p;
+    ctx.fillRect(x - 5, 0, 10, canvas.height);
+  }
+  // 上下端のフレーム帯
+  ctx.fillRect(0, 0, canvas.width, 10);
+  ctx.fillRect(0, canvas.height - 10, canvas.width, 10);
+
+  // ボルト(小さい丸)を境界線・上下端に沿って配置
+  ctx.fillStyle = '#5a5d60';
+  const boltSpacing = 26;
+  function drawBoltsAlongY(x) {
+    for (let y = 8; y < canvas.height - 8; y += boltSpacing) {
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  function drawBoltsAlongX(y) {
+    for (let x = 8; x < canvas.width - 8; x += boltSpacing) {
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  for (let p = 1; p < panelCols; p++) drawBoltsAlongY(panelW * p);
+  drawBoltsAlongY(4);
+  drawBoltsAlongY(canvas.width - 4);
+  drawBoltsAlongX(5);
+  drawBoltsAlongX(canvas.height - 5);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+const longTex1 = createPanelTexture(LONG_PANELS, W / W);
+const longTex2 = createPanelTexture(LONG_PANELS, W / W);
+const endTex1 = createPanelTexture(END_PANELS, D / W);
+const endTex2 = createPanelTexture(END_PANELS, D / W);
+
+const topMat = new THREE.MeshStandardMaterial({ color: 0xd6c98d, roughness: 0.7 });
+const bottomMat = new THREE.MeshStandardMaterial({ color: 0x8b8f92, roughness: 0.8 });
+
+const materials = [
+  new THREE.MeshStandardMaterial({ map: endTex1, roughness: 0.75 }),  // +x
+  new THREE.MeshStandardMaterial({ map: endTex2, roughness: 0.75 }),  // -x
+  topMat,                                                             // +y
+  bottomMat,                                                          // -y
+  new THREE.MeshStandardMaterial({ map: longTex1, roughness: 0.75 }), // +z
+  new THREE.MeshStandardMaterial({ map: longTex2, roughness: 0.75 }), // -z
+];
+
+const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), materials);
+body.castShadow = true;
+body.receiveShadow = true;
+tank.add(body);
+
+// ================= フレーム(縁+パネル区切りの山形鋼) =================
+const frameColor = 0x9aa0a6;
+const frameMat = new THREE.MeshStandardMaterial({ color: frameColor, roughness: 0.5, metalness: 0.35 });
+
+function edgeBar(length, axis, radius = 0.045) {
+  const geo = new THREE.CylinderGeometry(radius, radius, length, 8);
+  const bar = new THREE.Mesh(geo, frameMat);
+  if (axis === 'x') bar.rotation.z = Math.PI / 2;
+  if (axis === 'z') bar.rotation.x = Math.PI / 2;
+  bar.castShadow = true;
+  return bar;
+}
+
+const hx = W / 2, hy = H / 2, hz = D / 2;
+
+// 上下の縁
+[[hy, hz], [hy, -hz], [-hy, hz], [-hy, -hz]].forEach(([y, z]) => {
+  const bar = edgeBar(W, 'x');
+  bar.position.set(0, y, z);
+  tank.add(bar);
+});
+[[hy, hx], [hy, -hx], [-hy, hx], [-hy, -hx]].forEach(([y, x]) => {
+  const bar = edgeBar(D, 'z');
+  bar.position.set(x, y, 0);
+  tank.add(bar);
+});
+// 4隅の縦柱
+[[hx, hz], [hx, -hz], [-hx, hz], [-hx, -hz]].forEach(([x, z]) => {
+  const bar = edgeBar(H, 'y');
+  bar.position.set(x, 0, z);
+  tank.add(bar);
+});
+// 長辺パネル境界の縦柱(4分割→3本)
+for (let p = 1; p < LONG_PANELS; p++) {
+  const x = -hx + (W / LONG_PANELS) * p;
+  [hz, -hz].forEach((z) => {
+    const bar = edgeBar(H, 'y');
+    bar.position.set(x, 0, z);
+    tank.add(bar);
+  });
+}
+
+// ================= 上面の付属品(マンホール・通気キャップ・端部ハッチ・クロス配管) =================
+const capMat = new THREE.MeshStandardMaterial({ color: 0xdcd2a0, roughness: 0.5 });
+const pipeMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 0.45, metalness: 0.25 });
+const valveMat = new THREE.MeshStandardMaterial({ color: 0x4fb0a6, roughness: 0.4, metalness: 0.2 });
+const plaqueMat = new THREE.MeshStandardMaterial({ color: 0xf0ede0, roughness: 0.6 });
+
+const pw = W / LONG_PANELS; // パネル1枚分の幅
+function panelCenterX(i) { return -hx + pw * (i + 0.5); }
+
+function makeRoundCap(radius, height) {
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 24), capMat);
+  cap.castShadow = true;
+  return cap;
+}
+
+// --- C側(パネル0、-hx寄り = 撮影した近い側):大マンホール + 銘板(天板上) + 中央寄りの小キャップ2個 ---
+const manhole = new THREE.Group();
+const manholeBase = makeRoundCap(0.62, 0.22);
+manhole.add(manholeBase);
+const manholeTop = makeRoundCap(0.6, 0.08);
+manholeTop.position.y = 0.15;
+manhole.add(manholeTop);
+manhole.position.set(panelCenterX(0), hy + 0.12, 0);
+tank.add(manhole);
+
+// 小キャップ2個(マンホールより中央=パネル1寄りに並ぶ)
+[-0.4, 0.4].forEach((z) => {
+  const smallCap = makeRoundCap(0.08, 0.14);
+  smallCap.position.set(panelCenterX(0) + 0.55, hy + 0.08, z);
+  tank.add(smallCap);
+});
+
+// 銘板(天板の上にマンホールと並べて水平に設置)
+const plaque = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 0.24), plaqueMat);
+plaque.position.set(panelCenterX(0) + 0.75, hy + 0.02, -0.15);
+tank.add(plaque);
+
+// --- A側(パネル3、+hx寄り = 建物側の奥):小さめの丸ハッチ + 隣接する通気キャップ1個 ---
+const farHatch = new THREE.Group();
+const farHatchBase = makeRoundCap(0.4, 0.16);
+farHatch.add(farHatchBase);
+farHatch.position.set(panelCenterX(3) + 0.15, hy + 0.08, -0.1);
+tank.add(farHatch);
+
+// --- 通気キノコキャップ ---
+function makeMushroomVent(x, z) {
+  const vent = new THREE.Group();
+  const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.18, 12), capMat);
+  stem.position.y = 0.09;
+  vent.add(stem);
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+  dome.position.y = 0.18;
+  vent.add(dome);
+  vent.position.set(x, hy, z);
+  return vent;
+}
+// ハッチのすぐ脇(A側)
+tank.add(makeMushroomVent(panelCenterX(3) - 0.45, 0.35));
+// マンホール寄り(C側、パネル1)
+tank.add(makeMushroomVent(panelCenterX(1) - 0.3, -0.1));
+
+
+// --- B・D面に平行な長辺方向のヘッダー配管(タンク全長に沿って設置、バルブハンドルは表示しない) ---
+function makePipeRunTop(points, radius = 0.06) {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const geo = new THREE.TubeGeometry(curve, 24, radius, 10, false);
+  const mesh = new THREE.Mesh(geo, pipeMat);
+  mesh.castShadow = true;
+  return mesh;
+}
+
+// 2点間を結ぶ直線パイプ(軸に関わらず対応、直角に曲がる配管の各区間に使用)
+function makeStraightPipe(p1, p2, radius = 0.055, mat = pipeMat) {
+  const dx = p2.x - p1.x, dy = p2.y - p1.y, dz = p2.z - p1.z;
+  const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const geo = new THREE.CylinderGeometry(radius, radius, length, 10);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set((p1.x + p2.x) / 2, (p1.y + p2.y) / 2, (p1.z + p2.z) / 2);
+  const dir = new THREE.Vector3(dx, dy, dz).normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  mesh.quaternion.setFromUnitVectors(up, dir);
+  mesh.castShadow = true;
+  return mesh;
+}
+// 直角の曲がり角に小さな球体ジョイントを置く
+function makeElbowJoint(p, radius = 0.06, mat = pipeMat) {
+  const joint = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 8), mat);
+  joint.position.copy(p);
+  return joint;
+}
+
+// テキストラベル(スプライト)生成。文字幅に応じてキャンバスサイズを自動調整し、はみ出しを防止
+function createSimpleTextSprite(text, options = {}) {
+  const fontSize = options.fontSize || 120;
+  const measureCanvas = document.createElement('canvas');
+  const measureCtx = measureCanvas.getContext('2d');
+  measureCtx.font = `bold ${fontSize}px sans-serif`;
+  const textWidth = measureCtx.measureText(text).width;
+
+  const paddingX = fontSize * 0.5;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(textWidth + paddingX * 2);
+  canvas.height = Math.ceil(fontSize * 1.5);
+  const ctx = canvas.getContext('2d');
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  // 縁取り(視認性向上)
+  ctx.lineWidth = fontSize / 8;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.strokeText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = options.color || '#222222';
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const scale = options.scale || 1.0;
+  const aspect = canvas.width / canvas.height;
+  const baseHeight = 0.5;
+  sprite.scale.set(baseHeight * aspect * scale, baseHeight * scale, 1);
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+// 水色ゲートバルブを生成
+function makeTealValve() {
+  const valve = new THREE.Group();
+  const valveBody = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.22, 12), pipeMat);
+  valveBody.rotation.z = Math.PI / 2;
+  valve.add(valveBody);
+  const valveStem = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.16, 8), pipeMat);
+  valveStem.position.y = 0.12;
+  valve.add(valveStem);
+  const valveWheel = new THREE.Mesh(new THREE.TorusGeometry(0.095, 0.02, 8, 16), valveMat);
+  valveWheel.rotation.x = Math.PI / 2;
+  valveWheel.position.y = 0.2;
+  valve.add(valveWheel);
+  [0, 1].forEach((a) => {
+    const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.018, 0.018), valveMat);
+    spoke.rotation.y = a * Math.PI / 2;
+    spoke.position.y = 0.2;
+    valve.add(spoke);
+  });
+  return valve;
+}
+
+// バルブ位置から直角に曲がってタンク上面へ流入する配管(Z軸→Y軸、X座標はバルブと同じ)
+function addInletPipe(valveX, headerY, z) {
+  const bendZ = z * 0.75; // Z軸方向(BC角・CD角/BA角・DA角のすぐ内側)
+  const pValve = new THREE.Vector3(valveX, headerY, z);
+  const pCorner = new THREE.Vector3(valveX, headerY, bendZ);
+  const pInlet = new THREE.Vector3(valveX, hy + 0.02, bendZ);
+
+  tank.add(makeStraightPipe(pValve, pCorner)); // Z軸方向(直角)
+  tank.add(makeElbowJoint(pCorner));
+  tank.add(makeStraightPipe(pCorner, pInlet)); // Y軸方向(直角、天板へ)
+
+  const inletFlange = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlange.position.copy(pInlet);
+  tank.add(inletFlange);
+}
+
+[[-hz - 0.1], [hz + 0.1]].forEach(([z]) => {
+  const headerY = hy + 0.22; // 天板のすぐ上、フレーム沿いの低い位置
+  const headerStartX = hx - 0.15;   // A側の端の手前まで(ここから上面へ流入、+hx)
+  const headerEndX = -hx + 0.15;    // C側の端の手前まで(ここから上面へ流入、-hx)
+  const valveXC = headerEndX + 0.12;   // C側バルブ位置(角ギリギリ)
+  const valveXA = headerStartX - 0.12; // A側バルブ位置(角ギリギリ)
+
+  // まっすぐな区間(A側バルブ〜C側バルブ)
+  const headerPipe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.055, 0.055, valveXA - valveXC, 10),
+    pipeMat
+  );
+  headerPipe.rotation.z = Math.PI / 2;
+  headerPipe.position.set((valveXA + valveXC) / 2, headerY, z);
+  headerPipe.castShadow = true;
+  tank.add(headerPipe);
+
+  // C側・A側それぞれに水色ゲートバルブを設置
+  const valveC = makeTealValve();
+  valveC.position.set(valveXC, headerY, z);
+  tank.add(valveC);
+
+  const valveA = makeTealValve();
+  valveA.position.set(valveXA, headerY, z);
+  tank.add(valveA);
+
+  // C側・A側それぞれから直角に曲がってタンク上面へ流入
+  addInletPipe(valveXC, headerY, z);
+  addInletPipe(valveXA, headerY, z);
+
+  // 支持スタンド(タンク上面に沿って複数箇所)
+  const standCount = 6;
+  for (let i = 0; i <= standCount; i++) {
+    const x = headerEndX + (headerStartX - headerEndX) * (i / standCount);
+    const stand = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.2, 8), frameMat);
+    stand.position.set(x, hy + 0.11, z);
+    tank.add(stand);
+  }
+});
+
+// ================= B面の新規配管(直角のみ、途中でA面/C面方向へ二股分岐、上下反転版) =================
+{
+  const pipe2Mat = new THREE.MeshStandardMaterial({ color: 0x87ceeb, roughness: 0.45, metalness: 0.2 }); // ②水色
+  const manholeRadius = 0.62; // マンホールの半径(makeRoundCapの引数と一致)
+  const bx = -hx + 1.6 - manholeRadius * 2 + manholeRadius * 2 * 3; // -直径分ずらした位置から、さらに+X方向へ直径×3
+  const bz = -hz - 0.15 - manholeRadius;    // マンホール半径分、-Z方向にずらす
+  const branchY = -hy + 0.1 + hy; // 分岐点の高さ(タンク高さの半分、上に延長)
+  const dropY = branchY + 0.55; // 分岐後、縦に少し伸びた先の高さ(上方向)
+  const zOffset = 0.12;      // 分岐を左右にずらす量(2本を視覚的に分離)
+  const valveXC = (-hx + 0.15) + 0.12; // C側バルブのX位置(上面配管のバルブ位置と同じ)
+  const valveXA = (hx - 0.15) - 0.12;  // A側バルブのX位置(上面配管のバルブ位置と同じ)
+
+  // 下部からの縦の配管(直角、開始位置はタンクの土台(脚部)の高さ)
+  const pTop = new THREE.Vector3(bx, -hy - 0.25, bz);
+  const pBranch = new THREE.Vector3(bx, branchY, bz);
+  tank.add(makeStraightPipe(pTop, pBranch, 0.075, pipe2Mat));
+  tank.add(makeElbowJoint(pBranch, 0.08, pipe2Mat));
+
+  // 「市水」ラベル(縦配管の中間あたりに表示)
+  const cityWaterLabel = createSimpleTextSprite('市水', { fontSize: 130, scale: 0.45, color: '#0b5f8a' });
+  cityWaterLabel.position.set(bx + 0.25, (pTop.y + pBranch.y) / 2, bz);
+  tank.add(cityWaterLabel);
+
+  // --- A面側の枝 ---
+  const pBranchA = new THREE.Vector3(bx, branchY, bz - zOffset);
+  const pDownA = new THREE.Vector3(bx, dropY, bz - zOffset);
+  const pArmA = new THREE.Vector3(valveXA, dropY, bz - zOffset);
+  tank.add(makeStraightPipe(pBranch, pBranchA, 0.07, pipe2Mat));
+  tank.add(makeStraightPipe(pBranchA, pDownA, 0.07, pipe2Mat));   // 縦方向(直角)
+  tank.add(makeElbowJoint(pDownA, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pDownA, pArmA, 0.07, pipe2Mat));      // A面方向へ直角に
+  const pArmA2 = new THREE.Vector3(valveXA, dropY + 0.3, bz - zOffset);
+  tank.add(makeElbowJoint(pArmA, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pArmA, pArmA2, 0.07, pipe2Mat));      // Y軸方向へ直角に0.4上へ
+  const pInletA = new THREE.Vector3(valveXA, dropY + 0.3, -hz);
+  tank.add(makeElbowJoint(pArmA2, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pArmA2, pInletA, 0.07, pipe2Mat));    // Z軸方向へ直角にタンク(B面)へ流入
+  const inletFlangeA = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlangeA.rotation.x = Math.PI / 2;
+  inletFlangeA.position.copy(pInletA);
+  tank.add(inletFlangeA);
+
+  // --- C面側の枝 ---
+  const pBranchC = new THREE.Vector3(bx, branchY, bz + zOffset);
+  const pDownC = new THREE.Vector3(bx, dropY, bz + zOffset);
+  const pArmC = new THREE.Vector3(valveXC, dropY, bz + zOffset);
+  tank.add(makeStraightPipe(pBranch, pBranchC, 0.07, pipe2Mat));
+  tank.add(makeStraightPipe(pBranchC, pDownC, 0.07, pipe2Mat));   // 縦方向(直角)
+  tank.add(makeElbowJoint(pDownC, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pDownC, pArmC, 0.07, pipe2Mat));      // C面方向へ直角に
+  const pArmC2 = new THREE.Vector3(valveXC, dropY + 0.3, bz + zOffset);
+  tank.add(makeElbowJoint(pArmC, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pArmC, pArmC2, 0.07, pipe2Mat));      // Y軸方向へ直角に0.4上へ
+  const pInletC = new THREE.Vector3(valveXC, dropY + 0.3, -hz);
+  tank.add(makeElbowJoint(pArmC2, 0.075, pipe2Mat));
+  tank.add(makeStraightPipe(pArmC2, pInletC, 0.07, pipe2Mat));    // Z軸方向へ直角にタンク(B面)へ流入
+  const inletFlangeC = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlangeC.rotation.x = Math.PI / 2;
+  inletFlangeC.position.copy(pInletC);
+  tank.add(inletFlangeC);
+}
+
+// ================= A面の新規配管(床からX軸方向0.6・Z軸中央位置で縦に伸び、直角にタンクへ流入) =================
+{
+  const grayMatA1 = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.2 });
+  const pStart = new THREE.Vector3(hx + 0.6, -hy - 0.25, 0); // タンクからX軸方向に0.6、Z軸はA面中央、開始位置はタンクの土台の高さ
+  const pTop = new THREE.Vector3(hx + 0.6, -hy - 0.25 + 0.6, 0); // 土台の高さからY軸方向に0.6の縦配管
+  tank.add(makeStraightPipe(pStart, pTop, 0.07, grayMatA1));
+
+  const pInlet = new THREE.Vector3(hx, -hy - 0.25 + 0.6, 0); // 直角にX軸方向へ伸ばしA面へ流入
+  tank.add(makeElbowJoint(pTop, 0.075, grayMatA1));
+  tank.add(makeStraightPipe(pTop, pInlet, 0.07, grayMatA1));
+
+  const inletFlange = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlange.rotation.z = Math.PI / 2;
+  inletFlange.position.copy(pInlet);
+  tank.add(inletFlange);
+}
+
+// ================= A面配管の接地面からZ軸-0.2の位置に新しい配管を追加 =================
+{
+  const grayMatA2 = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5, metalness: 0.2 });
+  const p0 = new THREE.Vector3(hx + 0.6, -hy - 0.25, -0.2); // 接地面からZ軸に-0.2の位置
+
+  const p1 = new THREE.Vector3(hx + 0.6, -hy - 0.25 + 0.1, -0.2); // 接地面からY軸に0.1伸ばす
+  tank.add(makeStraightPipe(p0, p1, 0.07, grayMatA2));
+
+  const p2 = new THREE.Vector3(hx + 0.6, -hy - 0.25 + 0.1, -0.2 - 1.0); // 直角に-Z軸に1.0伸ばす
+  tank.add(makeElbowJoint(p1, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p1, p2, 0.07, grayMatA2));
+
+  const p3 = new THREE.Vector3(hx + 0.6 - 1.24, -hy - 0.25 + 0.1, -0.2 - 1.0); // 直角に-X軸に1.24伸ばす
+  tank.add(makeElbowJoint(p2, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p2, p3, 0.07, grayMatA2));
+
+  const p4 = new THREE.Vector3(hx + 0.6 - 1.24, -hy - 0.25 + 0.1, -0.2 - 1.0 + 2.4); // 直角にZ軸に2.4伸ばす
+  tank.add(makeElbowJoint(p3, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p3, p4, 0.07, grayMatA2));
+
+  // さらに直角にY軸方向に0.3
+  const p5 = new THREE.Vector3(p4.x, p4.y + 0.3, p4.z);
+  tank.add(makeElbowJoint(p4, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p4, p5, 0.07, grayMatA2));
+
+  // さらに直角にX軸方向へ、上面配管(D面側)のバルブ位置に合わせる
+  const headerY = hy + 0.22;          // 上面配管の高さ(D面側ヘッダーと同じ)
+  const valveXA = (hx - 0.15) - 0.12; // 上面配管(D面側)のA側バルブのX位置
+  const p6 = new THREE.Vector3(valveXA, p5.y, p5.z);
+  tank.add(makeElbowJoint(p5, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p5, p6, 0.07, grayMatA2));
+
+  // さらに直角にY軸方向に伸ばし、上面配管(D面側)の高さへ
+  const p7 = new THREE.Vector3(p6.x, headerY, p6.z);
+  tank.add(makeElbowJoint(p6, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p6, p7, 0.07, grayMatA2));
+
+  // 上面配管(D面側)と接続
+  const pDHeader = new THREE.Vector3(valveXA, headerY, hz + 0.1); // D面側ヘッダー配管上の接続点
+  tank.add(makeElbowJoint(p7, 0.075, grayMatA2));
+  tank.add(makeStraightPipe(p7, pDHeader, 0.07, grayMatA2));
+
+  // 接地面(p0)のY軸方向-0.1の位置に「↓逆洗」ラベルを追加
+  const backwashLabel = createSimpleTextSprite('逆洗↓', { fontSize: 130, scale: 0.45, color: '#222222' });
+  backwashLabel.position.set(p0.x, p0.y, p0.z + 0.2 + 0.3);
+  tank.add(backwashLabel);
+}
+
+// ================= B面 一番左・一番右のパネルに、A面と同じ配管を追加 =================
+let pipeTipLeft, pipeTipRight; // 左右の配管の先端(後で単一の立方体に接続する)
+const grayMatB = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.2 });
+[panelCenterX(0), panelCenterX(3)].forEach((px, idx) => {
+  const pStart = new THREE.Vector3(px, -hy - 0.25, -hz - 0.6); // タンクからZ軸方向に0.6、開始位置はタンクの土台の高さ
+
+  // 左側(idx 0):土台位置(pStart)の先から直角に-X軸方向(B面長さの半分)、さらに直角に-Z軸方向へ1.24延長
+  if (idx === 0) {
+    const pExtendX = new THREE.Vector3(px + hx, -hy - 0.25, -hz - 0.6); // +X軸方向にB面長さの半分(hx)
+    tank.add(makeStraightPipe(pStart, pExtendX, 0.07, grayMatB));
+    tank.add(makeElbowJoint(pExtendX, 0.075, grayMatB));
+
+    const pExtendZ = new THREE.Vector3(px + hx, -hy - 0.25, -hz - 0.6 - 1.24); // 直角に-Z軸方向へ1.24
+    tank.add(makeStraightPipe(pExtendX, pExtendZ, 0.07, grayMatB));
+
+    // さらに直角にX軸方向に0.6延長
+    const pExtendX2 = new THREE.Vector3(px + hx + 0.6, -hy - 0.25, -hz - 0.6 - 1.24);
+    tank.add(makeElbowJoint(pExtendZ, 0.075, grayMatB));
+    tank.add(makeStraightPipe(pExtendZ, pExtendX2, 0.07, grayMatB));
+
+    // さらにZ軸方向に0.1延長
+    const pExtendZ2 = new THREE.Vector3(px + hx + 0.6, -hy - 0.25, -hz - 0.6 - 1.24 + 0.1);
+    tank.add(makeElbowJoint(pExtendX2, 0.075, grayMatB));
+    tank.add(makeStraightPipe(pExtendX2, pExtendZ2, 0.07, grayMatB));
+
+    pipeTipLeft = pExtendZ2;
+  }
+
+  // タンク土台位置(pStart)の先を直角に-Z軸方向へ1.24延長(右側=idx 1のみ)
+  if (idx === 1) {
+    const pFarStart = new THREE.Vector3(px, -hy - 0.25, -hz - 0.6 - 1.24);
+    tank.add(makeStraightPipe(pFarStart, pStart, 0.07, grayMatB));
+    tank.add(makeElbowJoint(pFarStart, 0.075, grayMatB));
+
+    // さらに-X軸方向に0.6延長
+    const pFarStart2 = new THREE.Vector3(px - 0.6, -hy - 0.25, -hz - 0.6 - 1.24);
+    tank.add(makeStraightPipe(pFarStart2, pFarStart, 0.07, grayMatB));
+
+    // 配管の先をさらに直角にZ軸方向に0.1延長
+    const pZExtend = new THREE.Vector3(pFarStart2.x, pFarStart2.y, pFarStart2.z + 0.1);
+    tank.add(makeElbowJoint(pFarStart2, 0.075, grayMatB));
+    tank.add(makeStraightPipe(pFarStart2, pZExtend, 0.07, grayMatB));
+
+    pipeTipRight = pZExtend;
+  }
+
+  const pTop = new THREE.Vector3(px, -hy - 0.25 + 0.6, -hz - 0.6); // 土台の高さからY軸方向に0.6の縦配管
+  tank.add(makeStraightPipe(pStart, pTop, 0.07, grayMatB));
+
+  const pInlet = new THREE.Vector3(px, -hy - 0.25 + 0.6, -hz); // 直角にZ軸方向へ伸ばしB面へ流入
+  tank.add(makeElbowJoint(pTop, 0.075, grayMatB));
+  tank.add(makeStraightPipe(pTop, pInlet, 0.07, grayMatB));
+
+  const inletFlangeB = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlangeB.rotation.x = Math.PI / 2;
+  inletFlangeB.position.copy(pInlet);
+  tank.add(inletFlangeB);
+});
+
+// --- 左右の配管を接続する単一の立方体 ---
+let pumpCube; // ラベル表示のため外部スコープに保持
+{
+  const cubeSize = 0.8;
+  const cubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+  const cubeCenterX = (pipeTipLeft.x + pipeTipRight.x) / 2;
+  const cubeCenterZ = Math.max(pipeTipLeft.z, pipeTipRight.z) + cubeSize / 2;
+  const cube = new THREE.Mesh(new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize), cubeMat);
+  cube.position.set(cubeCenterX, -hy - 0.25 + cubeSize / 2 - 0.25, cubeCenterZ);
+  cube.castShadow = true;
+  cube.receiveShadow = true;
+  tank.add(cube);
+  pumpCube = cube;
+
+  const cubeFlangeLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  cubeFlangeLeft.rotation.x = Math.PI / 2;
+  cubeFlangeLeft.position.copy(pipeTipLeft);
+  tank.add(cubeFlangeLeft);
+
+  const cubeFlangeRight = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  cubeFlangeRight.rotation.x = Math.PI / 2;
+  cubeFlangeRight.position.copy(pipeTipRight);
+  tank.add(cubeFlangeRight);
+
+  // 「加圧ポンパー」ラベル
+  const pumpLabel = createSimpleTextSprite('加圧ポンパー', { fontSize: 130, scale: 0.45 });
+  pumpLabel.position.set(cube.position.x, cube.position.y + 0.1, cube.position.z); // 立方体中央付近
+  tank.add(pumpLabel);
+}
+
+// ================= B面 中央2区画に、A面と同様の配管を追加 =================
+[panelCenterX(1), panelCenterX(2)].forEach((px, idx) => {
+  const pStart = new THREE.Vector3(px, -hy - 0.25, -hz - 0.4); // 開始位置はタンクの土台の高さ
+  const pTop = new THREE.Vector3(px, -hy - 0.25 + 0.6, -hz - 0.4); // 土台の高さからY軸方向に0.6の縦配管
+  tank.add(makeStraightPipe(pStart, pTop, 0.07));
+
+  const pInlet = new THREE.Vector3(px, -hy - 0.25 + 0.6, -hz); // 直角にZ軸方向へ伸ばしB面へ流入(Z軸方向を0.2短縮)
+  tank.add(makeElbowJoint(pTop, 0.075));
+  tank.add(makeStraightPipe(pTop, pInlet, 0.07));
+
+  const inletFlangeMid = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.05, 16), frameMat);
+  inletFlangeMid.rotation.x = Math.PI / 2;
+  inletFlangeMid.position.copy(pInlet);
+  tank.add(inletFlangeMid);
+
+  // 左側(idx 0)の配管のみ、床に面した先端(pStart)から直角にX軸方向に6.2延長
+  if (idx === 0) {
+    const pExtendXMid = new THREE.Vector3(px + 6.2, -hy - 0.25, -hz - 0.4);
+    tank.add(makeElbowJoint(pStart, 0.075));
+    tank.add(makeStraightPipe(pStart, pExtendXMid, 0.07));
+
+    // さらにX軸方向に温泉水システムの中央位置(X)まで延長
+    const equipCenterX = hx + 1.86; // 温泉水システムの中央位置(X軸)
+    const equipCenterZ = 0;         // 温泉水システムの中央位置(Z軸)
+    const pToEquipX = new THREE.Vector3(equipCenterX, -hy - 0.25, -hz - 0.4);
+    tank.add(makeStraightPipe(pExtendXMid, pToEquipX, 0.07));
+
+    // 直角にZ軸方向に温泉水システムの中央位置(Z)まで延長
+    const pToEquipZ = new THREE.Vector3(equipCenterX, -hy - 0.25, equipCenterZ);
+    tank.add(makeElbowJoint(pToEquipX, 0.075));
+    tank.add(makeStraightPipe(pToEquipX, pToEquipZ, 0.07));
+  }
+});
+
+// ================= 小さい設備(温泉水システム、配管は含まない) =================
+{
+  const equipDiameter = 0.62;
+  const equipHeight = 1.24;
+  const equipRadius = equipDiameter / 2;
+  const equipX = hx + 1.86;  // タンクA面からX軸方向に1.86離れた位置
+  const equipZ = 0;          // Z軸方向:タンクA面中央
+  const equipBottomY = -hy - 0.25; // Y軸方向:タンク土台の位置
+  const equipCenterY = equipBottomY + equipHeight / 2;
+
+  const equipMat = new THREE.MeshStandardMaterial({ color: 0xacacac, roughness: 0.4, metalness: 0.6 });
+
+  // 円筒本体
+  const equipBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(equipRadius, equipRadius, equipHeight, 32),
+    equipMat
+  );
+  equipBody.position.set(equipX, equipCenterY, equipZ);
+  equipBody.castShadow = true;
+  equipBody.receiveShadow = true;
+  tank.add(equipBody);
+
+  // 上部の蓋(フランジ状のリム)
+  const equipLid = new THREE.Mesh(
+    new THREE.CylinderGeometry(equipRadius + 0.04, equipRadius + 0.04, 0.05, 32),
+    equipMat
+  );
+  equipLid.position.set(equipX, equipBottomY + equipHeight, equipZ);
+  tank.add(equipLid);
+
+  // 支持フレーム(簡易な脚)
+  const equipLegMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.6, metalness: 0.4 });
+  const equipLegHeight = 0.35;
+  [[-0.4, -0.4], [0.4, -0.4], [-0.4, 0.4], [0.4, 0.4]].forEach(([dx, dz]) => {
+    const leg = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, equipLegHeight, 0.06),
+      equipLegMat
+    );
+    leg.position.set(equipX + dx, equipBottomY - equipLegHeight / 2, equipZ + dz);
+    leg.castShadow = true;
+    tank.add(leg);
+  });
+
+  // --- 配管(設備のB面側=-Z方向のフランジから外へ、上へ、タンク方向へ水平に伸びる) ---
+  const pipeRadius = 0.09;
+  const flangeY = equipBottomY + equipHeight * 0.68; // 側面フランジの高さ(上寄り)
+  const pFlange = new THREE.Vector3(equipX, flangeY, equipZ - equipRadius);
+  const pOut = new THREE.Vector3(equipX, flangeY, equipZ - equipRadius - 0.35);
+  const pUp = new THREE.Vector3(equipX, equipBottomY + equipHeight + 0.5, equipZ - equipRadius - 0.35);
+  const pFar = new THREE.Vector3(equipX - 1.6, equipBottomY + equipHeight + 0.5, equipZ - equipRadius - 0.35);
+
+  // 側面接続フランジ(B面側を向く)
+  const pipeFlange = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.05, 16), frameMat);
+  pipeFlange.rotation.x = Math.PI / 2;
+  pipeFlange.position.copy(pFlange);
+  tank.add(pipeFlange);
+
+  tank.add(makeStraightPipe(pFlange, pOut, pipeRadius));   // フランジから外へ(Z軸方向)
+  tank.add(makeElbowJoint(pOut, pipeRadius + 0.01));
+  tank.add(makeStraightPipe(pOut, pUp, pipeRadius));       // 上へ(Y軸方向)
+  tank.add(makeElbowJoint(pUp, pipeRadius + 0.01));
+  tank.add(makeStraightPipe(pUp, pFar, pipeRadius));       // タンク方向へ水平に(X軸方向)
+
+  // --- タンク上面のB面平行配管、A側バルブ位置からの延長・接続(タンクへは流入しない) ---
+  const headerY = hy + 0.22;      // B面ヘッダー配管の高さ(既存の値と一致)
+  const valveXA = (hx - 0.15) - 0.12; // A側バルブのX位置(既存の値と一致)
+  const pValveA = new THREE.Vector3(valveXA, headerY, -hz - 0.1); // B面ヘッダーのA側バルブ位置
+  const pExtendX = new THREE.Vector3(pFar.x, headerY, -hz - 0.1); // X軸方向に平行に延長
+  const pExtendDown = new THREE.Vector3(pFar.x, pFar.y, -hz - 0.1); // 直角に-Y軸方向へ
+
+  tank.add(makeStraightPipe(pValveA, pExtendX, pipeRadius));      // X軸方向に平行延長
+  tank.add(makeElbowJoint(pExtendX, pipeRadius + 0.01));
+  tank.add(makeStraightPipe(pExtendX, pExtendDown, pipeRadius));  // 直角に-Y軸方向
+  tank.add(makeElbowJoint(pExtendDown, pipeRadius + 0.01));
+  tank.add(makeStraightPipe(pExtendDown, pFar, pipeRadius));      // 設備側の配管と接続
+}
+const legMat = new THREE.MeshStandardMaterial({ color: 0xb9bcbe, roughness: 0.8 });
+function makeLeg() {
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, D * 0.9), legMat);
+  leg.castShadow = true;
+  leg.receiveShadow = true;
+  return leg;
+}
+const legY = -hy - 0.25;
+const legCount = LONG_PANELS + 1;
+for (let i = 0; i < legCount; i++) {
+  const x = -hx + (W / (legCount - 1)) * i;
+  const leg = makeLeg();
+  leg.position.set(x, legY, 0);
+  tank.add(leg);
+}
+// 縦梁(2本、脚を繋ぐ)
+[hz * 0.6, -hz * 0.6].forEach((z) => {
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(W, 0.12, 0.18), legMat);
+  beam.position.set(0, legY - 0.19, z);
+  beam.castShadow = true;
+  tank.add(beam);
+});
+
+// ================= 梯子(C面:-x側の短辺面に設置) =================
+const ladderMat = new THREE.MeshStandardMaterial({ color: 0xa9adb0, roughness: 0.4, metalness: 0.4 });
+const ladderGroup = new THREE.Group();
+const ladderX = -hx - 0.12;
+const ladderTopY = hy + 1.1;      // 天板より上に突き出す安全手すり分
+const ladderBottomY = -hy - 0.2;  // 地上付近まで
+const ladderHeight = ladderTopY - ladderBottomY;
+const railOffset = 0.28;
+
+[-railOffset / 2, railOffset / 2].forEach((zOff) => {
+  const rail = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.035, ladderHeight, 8),
+    ladderMat
+  );
+  rail.position.set(ladderX, (ladderTopY + ladderBottomY) / 2, zOff);
+  rail.castShadow = true;
+  ladderGroup.add(rail);
+});
+// 踏み桟(ラング) - z方向に架け渡す
+const rungCount = Math.floor(ladderHeight / 0.28);
+for (let i = 0; i <= rungCount; i++) {
+  const y = ladderBottomY + i * (ladderHeight / rungCount);
+  const rung = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, railOffset, 8),
+    ladderMat
+  );
+  rung.rotation.x = Math.PI / 2;
+  rung.position.set(ladderX, y, 0);
+  ladderGroup.add(rung);
+}
+// タンク側面に固定する取付ブラケット(数箇所)
+for (let i = 1; i < 4; i++) {
+  const y = -hy + (H / 4) * i;
+  const bracket = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.035, 0.06), ladderMat);
+  bracket.position.set(-hx - 0.06, y, 0);
+  ladderGroup.add(bracket);
+}
+tank.add(ladderGroup);
+
+
+
+// ================= カメラ操作 =================
+let radius = 12;
+let theta = Math.PI / 3.2;
+let phi = Math.PI / 2.5;
+
+function updateCamera() {
+  const x = radius * Math.sin(phi) * Math.sin(theta);
+  const y = radius * Math.cos(phi);
+  const z = radius * Math.sin(phi) * Math.cos(theta);
+  camera.position.set(x, y, z);
+  camera.lookAt(0, 0, 0);
+}
+updateCamera();
+
+let isDragging = false;
+let prevX = 0, prevY = 0;
+
+function onPointerDown(x, y) { isDragging = true; prevX = x; prevY = y; }
+function onPointerMove(x, y) {
+  if (!isDragging) return;
+  const dx = x - prevX;
+  const dy = y - prevY;
+  theta -= dx * 0.008;
+  phi -= dy * 0.008;
+  phi = Math.max(0.2, Math.min(Math.PI - 0.2, phi));
+  prevX = x; prevY = y;
+  updateCamera();
+}
+function onPointerUp() { isDragging = false; }
+
+renderer.domElement.addEventListener('mousedown', (e) => onPointerDown(e.clientX, e.clientY));
+window.addEventListener('mousemove', (e) => onPointerMove(e.clientX, e.clientY));
+window.addEventListener('mouseup', onPointerUp);
+
+renderer.domElement.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  onPointerDown(t.clientX, t.clientY);
+}, { passive: true });
+renderer.domElement.addEventListener('touchmove', (e) => {
+  const t = e.touches[0];
+  onPointerMove(t.clientX, t.clientY);
+}, { passive: true });
+renderer.domElement.addEventListener('touchend', onPointerUp);
+
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  radius += e.deltaY * 0.008;
+  radius = Math.max(5, Math.min(30, radius));
+  updateCamera();
+}, { passive: false });
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // 「取説」リンクの位置をpumpLabelの下に追従させる
+  if (pumpCube) {
+    const manualLink = document.getElementById('manualLink');
+    const worldPos = new THREE.Vector3(pumpCube.position.x, pumpCube.position.y - 0.15, pumpCube.position.z);
+    tank.localToWorld(worldPos);
+    const projected = worldPos.clone().project(camera);
+
+    if (projected.z < 1) {
+      const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
+      const y = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+      manualLink.style.display = 'block';
+      manualLink.style.left = x + 'px';
+      manualLink.style.top = y + 'px';
+    } else {
+      manualLink.style.display = 'none';
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
