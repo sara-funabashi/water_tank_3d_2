@@ -28,8 +28,6 @@
 </head>
 <body>
 <div id="info">マウスドラッグで回転 / ホイールでズーム</div>
-<a id="manualLink" href="https://www.kawamoto.co.jp/manual/87233012.pdf" target="_blank" rel="noopener noreferrer"
-   style="position:absolute; display:none; color:#1a56db; font-weight:bold; font-size:15px; text-decoration:underline; background:rgba(255,255,255,0.85); padding:2px 8px; border-radius:6px; pointer-events:auto; transform:translate(-50%,-50%); z-index:10; white-space:nowrap;">取説</a>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 // ================= シーン基本セットアップ =================
@@ -624,6 +622,7 @@ const grayMatB = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.
 
 // --- 左右の配管を接続する単一の立方体 ---
 let pumpCube; // ラベル表示のため外部スコープに保持
+let manualLinkSprite; // 「取説」クリック判定用
 {
   const cubeSize = 0.8;
   const cubeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
@@ -650,6 +649,13 @@ let pumpCube; // ラベル表示のため外部スコープに保持
   const pumpLabel = createSimpleTextSprite('加圧ポンパー', { fontSize: 130, scale: 0.45 });
   pumpLabel.position.set(cube.position.x, cube.position.y + 0.1, cube.position.z - 1.0); // 手前(Z軸)に配置
   tank.add(pumpLabel);
+
+  // 「取説」ラベル(他の文字と同様にタンクへ固定される3Dスプライト、クリックでPDFを開く)
+  const manualLabel = createSimpleTextSprite('取説', { fontSize: 130, scale: 0.4, color: '#1a56db' });
+  manualLabel.position.set(pumpLabel.position.x, pumpLabel.position.y - 0.28, pumpLabel.position.z);
+  manualLabel.userData.linkUrl = 'https://www.kawamoto.co.jp/manual/87233012.pdf';
+  tank.add(manualLabel);
+  manualLinkSprite = manualLabel; // クリック判定用に外部スコープへ保持
 }
 
 // ================= B面 中央2区画に、A面と同様の配管を追加 =================
@@ -870,6 +876,27 @@ renderer.domElement.addEventListener('touchmove', (e) => {
 }, { passive: true });
 renderer.domElement.addEventListener('touchend', onPointerUp);
 
+// 「取説」ラベルをクリックしたらPDFを新しいタブで開く
+const clickRaycaster = new THREE.Raycaster();
+const clickMouse = new THREE.Vector2();
+function handleManualLabelClick(clientX, clientY) {
+  if (!manualLinkSprite) return;
+  clickMouse.x = (clientX / window.innerWidth) * 2 - 1;
+  clickMouse.y = -(clientY / window.innerHeight) * 2 + 1;
+  clickRaycaster.setFromCamera(clickMouse, camera);
+  const hits = clickRaycaster.intersectObject(manualLinkSprite, false);
+  if (hits.length > 0) {
+    window.open(manualLinkSprite.userData.linkUrl, '_blank', 'noopener,noreferrer');
+  }
+}
+renderer.domElement.addEventListener('click', (e) => handleManualLabelClick(e.clientX, e.clientY));
+renderer.domElement.addEventListener('touchend', (e) => {
+  if (e.changedTouches && e.changedTouches[0]) {
+    handleManualLabelClick(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+  }
+});
+
+
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
   radius += e.deltaY * 0.008;
@@ -885,24 +912,6 @@ window.addEventListener('resize', () => {
 
 function animate() {
   requestAnimationFrame(animate);
-
-  // 「取説」リンクの位置をpumpLabelの下に追従させる
-  if (pumpCube) {
-    const manualLink = document.getElementById('manualLink');
-    const worldPos = new THREE.Vector3(pumpCube.position.x, pumpCube.position.y - 0.1, pumpCube.position.z + 0.45);
-    tank.localToWorld(worldPos);
-    const projected = worldPos.clone().project(camera);
-
-    if (projected.z < 1) {
-      const x = (projected.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-projected.y * 0.5 + 0.5) * window.innerHeight;
-      manualLink.style.display = 'block';
-      manualLink.style.left = x + 'px';
-      manualLink.style.top = y + 'px';
-    } else {
-      manualLink.style.display = 'none';
-    }
-  }
 
   renderer.render(scene, camera);
 }
